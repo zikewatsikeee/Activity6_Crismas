@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Inventory</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: { extend: { colors: { primary: '#4f6bed', ink: '#12161f' } }, fontFamily: { sans: ['Inter', 'system-ui', 'Segoe UI', 'sans-serif'] } }
+  };
+  if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark');
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body class="bg-slate-100 text-slate-800 dark:bg-ink dark:text-slate-200 font-sans min-h-screen">
+<div class="mx-auto max-w-6xl px-4 py-5 sm:py-8">
+
+  <!-- header -->
+  <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-bold sm:text-3xl">Product Inventory</h1>
+      <p class="mt-1 text-slate-500 dark:text-slate-400">Track your stock, prices and quantities.</p>
+    </div>
+    <div class="flex items-center gap-3">
+      <button id="themeBtn" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700" aria-label="Toggle dark mode"></button>
+      <button id="authBtn" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:hover:bg-slate-700">Admin login</button>
+      <button id="addBtn" class="admin-only rounded-lg bg-gradient-to-r from-primary to-sky-500 px-4 py-2 text-sm font-semibold text-white shadow hover:opacity-90">+ Add Product</button>
+    </div>
+  </div>
+
+  <!-- low stock banner -->
+  <div id="alert" class="mb-3 hidden items-center justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+    <span id="alertText"></span>
+    <button id="alertBtn" class="shrink-0 font-semibold underline">Show them</button>
+  </div>
+
+  <!-- stat cards -->
+  <div id="stats" class="grid grid-cols-2 gap-3 xl:grid-cols-4"></div>
+
+  <!-- charts -->
+  <div class="mt-3.5 grid gap-3 lg:grid-cols-3">
+    <div class="card lg:col-span-2 rounded-xl bg-white p-5 shadow-sm dark:bg-slate-900">
+      <h3 class="font-semibold">Stock by product</h3>
+      <p class="mb-3 text-sm text-slate-500 dark:text-slate-400">Units on hand</p>
+      <div class="h-64"><canvas id="barChart"></canvas></div>
+    </div>
+    <div class="rounded-xl bg-white p-5 shadow-sm dark:bg-slate-900">
+      <h3 class="font-semibold">Stock status</h3>
+      <p class="mb-3 text-sm text-slate-500 dark:text-slate-400">Products by level</p>
+      <div class="mx-auto h-52 w-52"><canvas id="pieChart"></canvas></div>
+      <ul id="legend" class="mt-4 flex flex-wrap justify-center gap-x-5 gap-y-1 text-sm"></ul>
+    </div>
+  </div>
+
+  <!-- table -->
+  <div id="tableCard" class="mt-3.5 rounded-xl bg-white p-5 shadow-sm dark:bg-slate-900">
+    <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+      <h3 class="font-semibold">All products</h3>
+      <div class="flex w-full flex-wrap gap-2 sm:w-auto">
+        <input id="search" type="search" placeholder="Search products…" class="w-full min-w-0 rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-primary sm:w-56 dark:border-slate-700" />
+        <select id="catFilter" aria-label="Filter by category" class="min-w-0 flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-900 sm:flex-none"></select>
+        <select id="sortSel" aria-label="Sort products" class="min-w-0 flex-1 rounded-lg border border-slate-300 bg-transparent px-3 py-2 text-sm outline-none focus:border-primary dark:border-slate-700 dark:bg-slate-900 md:hidden">
+          <option value="">Sort: default</option><option value="name:1">Name A–Z</option><option value="name:-1">Name Z–A</option>
+          <option value="price:1">Price low–high</option><option value="price:-1">Price high–low</option>
+          <option value="qty:1">Qty low–high</option><option value="qty:-1">Qty high–low</option>
+        </select>
+        <button id="csvBtn" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800 sm:flex-none">Export CSV</button>
+      </div>
+    </div>
+    <div id="chips" class="mb-4 flex flex-wrap gap-2"></div>
+    <div class="overflow-x-auto">
+      <table id="prodTable" class="w-full whitespace-nowrap text-left text-sm">
+        <thead class="text-slate-500 dark:text-slate-400">
+          <tr class="border-b border-slate-200 dark:border-slate-800">
+            <th data-sort="name" class="cursor-pointer select-none py-3 pr-4 font-medium hover:text-primary">Product<span class="arrow"></span></th>
+            <th class="py-3 pr-4 font-medium">Category</th>
+            <th data-sort="price" class="cursor-pointer select-none py-3 pr-4 font-medium hover:text-primary">Price<span class="arrow"></span></th>
+            <th data-sort="qty" class="cursor-pointer select-none py-3 pr-4 font-medium hover:text-primary">Qty<span class="arrow"></span></th>
+            <th class="py-3 pr-4 font-medium">Status</th>
+            <th class="admin-only py-3 text-right font-medium">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p id="empty" class="hidden py-10 text-center text-slate-500">No products yet.</p>
+    <p id="noMatch" class="hidden py-10 text-center text-slate-500">No products match your search or filter.</p>
+  </div>
+</div>
+
+<!-- footer -->
+<footer class="mx-auto max-w-6xl px-4 pb-8 text-center text-sm text-slate-500 dark:text-slate-400">
+  © 2026 Product Inventory. Built for our class activity.
+</footer>
+
+<!-- add / edit modal -->
+<div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+  <form id="form" class="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900">
+    <h2 id="modalTitle" class="mb-4 text-xl font-semibold">Add product</h2>
+    <div class="mb-4 flex items-center gap-4">
+      <div id="preview" class="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-xs text-slate-400 dark:bg-slate-800">No image</div>
+      <label class="cursor-pointer rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800">
+        Choose picture
+        <input id="image" type="file" accept="image/*" class="hidden" />
+      </label>
+    </div>
+    <div class="space-y-3">
+      <input id="name" required placeholder="Product name" class="inp" />
+      <input id="category" placeholder="Category (e.g. Electronics)" class="inp" />
+      <div class="grid grid-cols-2 gap-3">
+        <input id="price" type="number" min="0" step="0.01" required placeholder="Price" class="inp" />
+        <input id="qty" type="number" min="0" step="1" required placeholder="Quantity" class="inp" />
+      </div>
+    </div>
+    <div class="mt-6 flex justify-end gap-3">
+      <button type="button" id="cancel" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium dark:border-slate-700">Cancel</button>
+      <button type="submit" class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white">Save product</button>
+    </div>
+  </form>
+</div>
+
+<!-- login modal -->
+<div id="loginModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+  <form id="loginForm" class="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900">
+    <h2 class="text-lg font-semibold">Admin login</h2>
+    <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Log in to add, edit or delete products.</p>
+    <input id="loginPw" type="password" required autocomplete="current-password" placeholder="Admin password" class="inp mt-4" />
+    <p id="loginErr" class="mt-2 hidden text-sm text-rose-500"></p>
+    <div class="mt-5 flex justify-end gap-3">
+      <button type="button" id="loginCancel" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium dark:border-slate-700">Cancel</button>
+      <button type="submit" class="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white">Log in</button>
+    </div>
+  </form>
+</div>
+
+<!-- delete modal -->
+<div id="delModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+  <div class="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl dark:bg-slate-900">
+    <h2 class="text-lg font-semibold">Delete product?</h2>
+    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400"><span id="delName" class="font-medium text-slate-800 dark:text-slate-200"></span> will be removed permanently. This can’t be undone.</p>
+    <div class="mt-6 flex justify-end gap-3">
+      <button id="delCancel" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium dark:border-slate-700">Keep it</button>
+      <button id="delOk" class="rounded-lg bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-600">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- toast -->
+<div id="toast" class="pointer-events-none fixed inset-x-4 bottom-4 z-[60] sm:inset-x-auto sm:bottom-5 sm:right-5 translate-y-4 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-medium text-white opacity-0 shadow-lg transition dark:bg-slate-100 dark:text-slate-900"></div>
+
+<style>
+  .inp { width:100%; border-radius:.5rem; border:1px solid #cbd5e1; background:transparent; padding:.55rem .75rem; font-size:.875rem; outline:none; }
+  .inp:focus { border-color:#4f6bed; }
+  .dark .inp { border-color:#334155; }
+  .dark .inp::placeholder { color:#64748b; }
+  body:not(.is-admin) .admin-only { display:none !important; }
+  #toast.show { opacity:1; transform:translateY(0); pointer-events:auto; }
+  @media (prefers-reduced-motion: reduce) { #toast { transition:none; } }
+  @media (max-width: 639px) { .inp, #search, #catFilter, #sortSel { font-size:16px; } }
+  @media (max-width: 767px) {
+    #prodTable, #prodTable tbody { display:block; white-space:normal; }
+    #prodTable thead { display:none; }
+    #prodTable tr { display:grid; grid-template-columns:1fr auto; gap:.6rem .75rem; align-items:center; padding:1rem 0; }
+    #prodTable td { display:block; padding:0 !important; text-align:left !important; }
+    #prodTable td:nth-child(1), #prodTable td:nth-child(6) { grid-column:1 / -1; }
+    #prodTable td:nth-child(3), #prodTable td:nth-child(5) { justify-self:end; text-align:right !important; }
+    #prodTable td:nth-child(6) button { margin:0 .5rem 0 0 !important; padding:.4rem .9rem; border:1px solid currentColor; border-radius:.5rem; }
+  }
+</style>
+
+<script>
+const LOW = 10;
+let isAdmin = false;
+const $ = (id) => document.getElementById(id);
+let products = [];
+let editingId = null, imageData = '', barChart, pieChart;
+let cat = '', filter = 'all', sortKey = null, sortDir = 1, delId = null, toastTimer;
+
+async function api(method, body, id) {
+  const res = await fetch('api.php' + (id ? '?id=' + id : ''), {
+    method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json();
+  if (res.status === 401) setAdmin(false);
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+async function load() {
+  try { products = await api('GET'); }
+  catch (e) { alert('Cannot reach api.php. Open this page through PHP (http://localhost:8000), not by double-clicking the file.'); }
+  render();
+}
+function toast(msg, action) {
+  const t = $('toast');
+  t.innerHTML = `<span>${esc(msg)}</span>` + (action ? `<button id="toastBtn" class="ml-3 font-semibold underline">${esc(action.label)}</button>` : '');
+  t.classList.add('show');
+  if (action) $('toastBtn').onclick = () => { clearTimeout(toastTimer); t.classList.remove('show'); action.run(); };
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), action ? 6000 : 2200);
+}
+const money = (n) => '₱' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const level = (q) => q === 0 ? 'out' : q <= LOW ? 'low' : 'in';
+const status = (q) => ({
+  out: ['Out of stock', 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-300', 'bg-rose-500'],
+  low: ['Low stock', 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300', 'bg-amber-500'],
+  in: ['In stock', 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300', 'bg-emerald-500'],
+}[level(q)]);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const thumb = (p, size) => p.image
+  ? `<img src="${p.image}" alt="" class="${size} shrink-0 rounded-lg object-cover" />`
+  : `<div class="${size} flex shrink-0 items-center justify-center rounded-lg bg-primary/10 font-semibold text-primary">${esc(p.name.charAt(0).toUpperCase())}</div>`;
+
+const ico = (d) => `<svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const ICONS = {
+  box: ico('<path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/>'),
+  stack: ico('<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>'),
+  coin: ico('<circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5h4a1.5 1.5 0 010 3h-3a1.5 1.5 0 000 3h4"/>'),
+  warn: ico('<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18v.01"/>'),
+};
+
+function renderStats() {
+  const units = products.reduce((s, p) => s + p.qty, 0);
+  const value = products.reduce((s, p) => s + p.qty * p.price, 0);
+  const low = products.filter((p) => p.qty <= LOW).length;
+  const cards = [
+    ['Products', products.length, 'text-primary', 'bg-primary/10', ICONS.box],
+    ['Total units', units.toLocaleString(), 'text-emerald-500', 'bg-emerald-500/10', ICONS.stack],
+    ['Inventory value', money(value), 'text-sky-500', 'bg-sky-500/10', ICONS.coin],
+    ['Low or out of stock', low, 'text-rose-500', 'bg-rose-500/10', ICONS.warn],
+  ];
+  $('stats').innerHTML = cards.map(([l, v, c, bg, icon]) =>
+    `<div class="flex items-center justify-between rounded-xl bg-white p-4 shadow-sm sm:p-5 dark:bg-slate-900">
+      <div><p class="text-sm text-slate-500 dark:text-slate-400">${l}</p><p class="mt-2 text-xl font-bold sm:text-2xl ${c}">${v}</p></div>
+      <div class="hidden size-11 shrink-0 items-center justify-center rounded-full sm:flex ${bg} ${c}">${icon}</div>
+    </div>`).join('');
+
+  const a = $('alert');
+  a.classList.toggle('hidden', low === 0);
+  a.classList.toggle('flex', low > 0);
+  $('alertText').textContent = low === 1 ? '1 product needs restocking.' : `${low} products need restocking.`;
+}
+
+function renderChips() {
+  const n = { all: products.length, in: 0, low: 0, out: 0 };
+  products.forEach((p) => n[level(p.qty)]++);
+  n.restock = n.low + n.out;
+  const defs = [['all', 'All'], ['in', 'In stock'], ['low', 'Low stock'], ['out', 'Out of stock'], ['restock', 'Needs restocking']];
+  $('chips').innerHTML = defs.map(([k, label]) =>
+    `<button data-filter="${k}" class="rounded-full px-3 py-1 text-xs font-medium ${filter === k
+      ? 'bg-primary text-white'
+      : 'border border-slate-300 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'}">${label} (${n[k]})</button>`).join('');
+}
+
+function renderTable() {
+  const q = $('search').value.trim().toLowerCase();
+  let list = products.filter((p) =>
+    (filter === 'all' || (filter === 'restock' ? p.qty <= LOW : level(p.qty) === filter)) && (!cat || p.category === cat) && (p.name + ' ' + p.category).toLowerCase().includes(q));
+  if (sortKey) list = [...list].sort((a, b) =>
+    (sortKey === 'name' ? a.name.localeCompare(b.name) : a[sortKey] - b[sortKey]) * sortDir);
+
+  document.querySelectorAll('th[data-sort]').forEach((th) => {
+    th.querySelector('.arrow').textContent = th.dataset.sort === sortKey ? (sortDir === 1 ? ' ▲' : ' ▼') : '';
+  });
+  $('sortSel').value = sortKey ? sortKey + ':' + sortDir : '';
+  $('empty').classList.toggle('hidden', products.length > 0);
+  $('noMatch').classList.toggle('hidden', products.length === 0 || list.length > 0);
+
+  $('rows').innerHTML = list.map((p) => {
+    const [label, cls, dot] = status(p.qty);
+    return `<tr class="border-b border-slate-100 last:border-0 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-white/5">
+      <td class="py-3 pr-4"><div class="flex items-center gap-3">${thumb(p, 'size-10')}<span class="font-medium">${esc(p.name)}</span></div></td>
+      <td class="py-3 pr-4 text-slate-500 dark:text-slate-400">${esc(p.category || '—')}</td>
+      <td class="py-3 pr-4">${money(p.price)}</td>
+      <td class="py-3 pr-4"><div class="inline-flex items-center gap-1.5">
+        <button data-dec="${p.id}" aria-label="Decrease quantity" class="admin-only size-8 rounded border border-slate-300 leading-none hover:bg-slate-100 sm:size-6 dark:border-slate-700 dark:hover:bg-slate-800">−</button>
+        <span class="w-8 text-center">${p.qty}</span>
+        <button data-inc="${p.id}" aria-label="Increase quantity" class="admin-only size-8 rounded border border-slate-300 leading-none hover:bg-slate-100 sm:size-6 dark:border-slate-700 dark:hover:bg-slate-800">+</button>
+      </div></td>
+      <td class="py-3 pr-4"><span class="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${cls}"><span class="size-1.5 rounded-full ${dot}"></span>${label}</span></td>
+      <td class="admin-only py-3 text-right">
+        <button data-edit="${p.id}" class="mr-3 text-primary hover:underline">Edit</button>
+        <button data-del="${p.id}" class="text-rose-500 hover:underline">Delete</button>
+      </td></tr>`;
+  }).join('');
+}
+
+function renderCharts() {
+  const dark = document.documentElement.classList.contains('dark');
+  const text = dark ? '#94a3b8' : '#64748b', grid = dark ? '#1e293b' : '#e2e8f0';
+  Chart.defaults.color = text;
+  const counts = [
+    products.filter((p) => p.qty > LOW).length,
+    products.filter((p) => p.qty > 0 && p.qty <= LOW).length,
+    products.filter((p) => p.qty === 0).length,
+  ];
+  const colors = ['#10b981', '#f59e0b', '#f43f5e'], names = ['In stock', 'Low stock', 'Out of stock'];
+  $('legend').innerHTML = names.map((n, i) =>
+    `<li class="flex items-center gap-2"><span class="size-2 rounded-full" style="background:${colors[i]}"></span>${counts[i]} ${n}</li>`).join('');
+
+  if (barChart) barChart.destroy();
+  if (pieChart) pieChart.destroy();
+  barChart = new Chart($('barChart'), {
+    type: 'bar',
+    data: { labels: products.map((p) => p.name), datasets: [{ data: products.map((p) => p.qty), backgroundColor: '#4f6bed', borderRadius: 4, maxBarThickness: 28 }] },
+    options: { maintainAspectRatio: false, plugins: { legend: { display: false } },
+      scales: { x: { grid: { display: false } }, y: { beginAtZero: true, grid: { color: grid } } } },
+  });
+  pieChart = new Chart($('pieChart'), {
+    type: 'doughnut',
+    data: { labels: names, datasets: [{ data: counts, backgroundColor: colors, borderWidth: 0 }] },
+    options: { maintainAspectRatio: false, cutout: '68%', plugins: { legend: { display: false } } },
+  });
+}
+
+function renderCats() {
+  const cats = [...new Set(products.map((p) => p.category).filter(Boolean))].sort();
+  if (cat && !cats.includes(cat)) cat = '';
+  $('catFilter').innerHTML = '<option value="">All categories</option>' +
+    cats.map((c) => `<option value="${esc(c)}"${c === cat ? ' selected' : ''}>${esc(c)}</option>`).join('');
+}
+
+/* quick +/- stock buttons (saves 0.5s after the last click) */
+const qtyTimers = {};
+function adjustQty(id, delta) {
+  const p = products.find((x) => x.id == id);
+  if (!p || p.qty + delta < 0) return;
+  p.qty += delta;
+  render();
+  clearTimeout(qtyTimers[id]);
+  qtyTimers[id] = setTimeout(async () => {
+    const cur = products.find((x) => x.id == id);
+    if (!cur) return;
+    try { await api('PUT', { name: cur.name, category: cur.category, price: cur.price, qty: cur.qty, image: cur.image || '' }, id); }
+    catch (err) { toast('Could not save: ' + err.message); load(); }
+  }, 500);
+}
+
+function render() { renderStats(); renderCats(); renderChips(); renderTable(); renderCharts(); }
+
+/* theme */
+function setThemeLabel() {
+  $('themeBtn').textContent = document.documentElement.classList.contains('dark') ? '☀ Light' : '☾ Dark';
+}
+$('themeBtn').onclick = () => {
+  const d = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('theme', d ? 'dark' : 'light');
+  setThemeLabel(); renderCharts();
+};
+
+/* filters, sorting, export */
+$('chips').onclick = (e) => {
+  const f = e.target.dataset.filter;
+  if (f) { filter = f; renderChips(); renderTable(); }
+};
+$('alertBtn').onclick = () => {
+  filter = 'restock'; renderChips(); renderTable();
+  $('tableCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
+document.querySelector('thead').onclick = (e) => {
+  const th = e.target.closest('th[data-sort]');
+  if (!th) return;
+  if (sortKey === th.dataset.sort) sortDir = -sortDir; else { sortKey = th.dataset.sort; sortDir = 1; }
+  renderTable();
+};
+$('csvBtn').onclick = () => {
+  if (!products.length) return toast('Nothing to export yet');
+  const cell = (v) => '"' + String(v).replace(/"/g, '""') + '"';
+  const rows = [['Name', 'Category', 'Price', 'Quantity', 'Status'],
+    ...products.map((p) => [p.name, p.category || '', p.price, p.qty, status(p.qty)[0]])];
+  const blob = new Blob(['\ufeff' + rows.map((r) => r.map(cell).join(',')).join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'inventory.csv'; a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Exported inventory.csv');
+};
+
+/* add / edit modal */
+function openModal(p) {
+  editingId = p ? p.id : null;
+  imageData = p ? p.image : '';
+  $('modalTitle').textContent = p ? 'Edit product' : 'Add product';
+  $('name').value = p ? p.name : '';
+  $('category').value = p ? p.category : '';
+  $('price').value = p ? p.price : '';
+  $('qty').value = p ? p.qty : '';
+  $('image').value = '';
+  showPreview();
+  $('modal').classList.replace('hidden', 'flex');
+  $('name').focus();
+}
+const closeModal = () => $('modal').classList.replace('flex', 'hidden');
+function showPreview() {
+  $('preview').innerHTML = imageData ? `<img src="${imageData}" class="size-full object-cover" alt="" />` : 'No image';
+}
+// shrink pictures so they fit in browser storage
+$('image').onchange = (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 240, scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = img.width * scale; c.height = img.height * scale;
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      imageData = c.toDataURL('image/jpeg', 0.8);
+      showPreview();
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+};
+
+$('addBtn').onclick = () => openModal();
+$('cancel').onclick = closeModal;
+$('modal').onclick = (e) => { if (e.target === $('modal')) closeModal(); };
+
+/* delete modal */
+const closeDel = () => $('delModal').classList.replace('flex', 'hidden');
+$('delCancel').onclick = closeDel;
+$('delModal').onclick = (e) => { if (e.target === $('delModal')) closeDel(); };
+$('delOk').onclick = async () => {
+  const gone = products.find((p) => p.id == delId);
+  try {
+    await api('DELETE', null, delId); closeDel(); await load();
+    toast('Product deleted', { label: 'Undo', run: async () => {
+      try {
+        await api('POST', { name: gone.name, category: gone.category, price: gone.price, qty: gone.qty, image: gone.image || '' });
+        await load(); toast('Product restored');
+      } catch (err) { alert(err.message); }
+    } });
+  } catch (err) { alert(err.message); }
+};
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeModal(); closeDel(); closeLogin(); } });
+
+$('form').onsubmit = async (e) => {
+  e.preventDefault();
+  const data = {
+    name: $('name').value.trim(),
+    category: $('category').value.trim(),
+    price: parseFloat($('price').value) || 0,
+    qty: parseInt($('qty').value, 10) || 0,
+    image: imageData,
+  };
+  try {
+    const wasEdit = !!editingId;
+    if (editingId) await api('PUT', data, editingId); else await api('POST', data);
+    closeModal(); await load();
+    toast(wasEdit ? 'Changes saved' : 'Product added');
+  } catch (err) { alert(err.message); }
+};
+
+$('catFilter').onchange = (e) => { cat = e.target.value; renderTable(); };
+$('sortSel').onchange = (e) => {
+  const v = e.target.value;
+  if (!v) { sortKey = null; sortDir = 1; } else { const [k, d] = v.split(':'); sortKey = k; sortDir = +d; }
+  renderTable();
+};
+$('rows').onclick = (e) => {
+  const ed = e.target.dataset.edit, del = e.target.dataset.del;
+  if (e.target.dataset.inc) return adjustQty(e.target.dataset.inc, 1);
+  if (e.target.dataset.dec) return adjustQty(e.target.dataset.dec, -1);
+  if (ed) openModal(products.find((p) => p.id == ed));
+  if (del) {
+    delId = del;
+    $('delName').textContent = products.find((p) => p.id == del).name;
+    $('delModal').classList.replace('hidden', 'flex');
+  }
+};
+$('search').oninput = renderTable;
+
+/* admin login */
+function setAdmin(v) {
+  isAdmin = !!v;
+  document.body.classList.toggle('is-admin', isAdmin);
+  $('authBtn').textContent = isAdmin ? 'Log out' : 'Admin login';
+}
+function closeLogin() { $('loginModal').classList.replace('flex', 'hidden'); }
+async function initAuth() {
+  try { setAdmin((await (await fetch('api.php?action=status')).json()).admin); } catch (e) { setAdmin(false); }
+}
+$('authBtn').onclick = async () => {
+  if (isAdmin) {
+    try { await fetch('api.php?action=logout'); } catch (e) {}
+    setAdmin(false); toast('Logged out');
+  } else {
+    $('loginPw').value = ''; $('loginErr').classList.add('hidden');
+    $('loginModal').classList.replace('hidden', 'flex');
+    $('loginPw').focus();
+  }
+};
+$('loginCancel').onclick = closeLogin;
+$('loginModal').onclick = (e) => { if (e.target === $('loginModal')) closeLogin(); };
+$('loginForm').onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const res = await fetch('api.php?action=login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: $('loginPw').value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Login failed');
+    setAdmin(true); closeLogin(); toast('Logged in as admin');
+  } catch (err) {
+    $('loginErr').textContent = err.message; $('loginErr').classList.remove('hidden');
+  }
+};
+
+setThemeLabel();
+setAdmin(false);
+initAuth();
+load();
+</script>
+</body>
+</html>
